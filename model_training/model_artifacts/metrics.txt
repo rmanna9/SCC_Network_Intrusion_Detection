@@ -1,0 +1,16 @@
+=== Network Intrusion Detection - Model Metrics ===
+
+Accuracy  : 0.7458
+F1 Score  : 0.6993
+              precision    recall  f1-score   support
+
+         DoS       0.96      0.77      0.86      7458
+       Probe       0.88      0.65      0.75      2421
+         R2L       0.89      0.01      0.02      2885
+         U2R       0.62      0.07      0.13        67
+      normal       0.64      0.97      0.77      9711
+       other       0.00      0.00      0.00         2
+
+    accuracy                           0.75     22544
+   macro avg       0.67      0.41      0.42     22544
+weighted avg       0.80      0.75      0.70     22544
