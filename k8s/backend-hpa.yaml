@@ -1,0 +1,48 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nid-backend-hpa
+  namespace: nid
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nid-backend
+
+  # Dimensionamento basato su 5000 req simultanee
+  # Ogni pod backend gestisce ~500 req/s con 4 uvicorn workers
+  # Minimo: 3 pod (alta disponibilità su 2 worker node)
+  # Massimo: 10 pod (copertura picco di 5000 req/s)
+  minReplicas: 3
+  maxReplicas: 10
+
+  metrics:
+    # Scala su CPU — principale indicatore di carico per inferenza ML
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+
+    # Scala su memoria
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30      # scala su rapidamente al picco
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 120     # scala giù lentamente per evitare oscillazioni
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60

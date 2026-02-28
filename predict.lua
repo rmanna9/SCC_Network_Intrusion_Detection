@@ -1,0 +1,50 @@
+-- predict.lua
+-- Script Lua per wrk: invia POST /predict con payload JSON
+-- Simula una connessione HTTP normale (traffico normale)
+-- Uso: wrk -t4 -c100 -d30s -s predict.lua http://localhost:8000/predict
+
+wrk.method = "POST"
+wrk.headers["Content-Type"] = "application/json"
+wrk.body = [[{
+  "duration": 0,
+  "protocol_type": "tcp",
+  "service": "http",
+  "flag": "SF",
+  "src_bytes": 215,
+  "dst_bytes": 45076,
+  "land": 0,
+  "wrong_fragment": 0,
+  "urgent": 0,
+  "hot": 1,
+  "num_failed_logins": 0,
+  "logged_in": 1,
+  "num_compromised": 0,
+  "root_shell": 0,
+  "su_attempted": 0,
+  "num_root": 0,
+  "num_file_creations": 0,
+  "num_shells": 0,
+  "num_access_files": 0,
+  "num_outbound_cmds": 0,
+  "is_host_login": 0,
+  "is_guest_login": 0,
+  "count": 1,
+  "srv_count": 1,
+  "serror_rate": 0.0,
+  "srv_serror_rate": 0.0,
+  "rerror_rate": 0.0,
+  "srv_rerror_rate": 0.0,
+  "same_srv_rate": 1.0,
+  "diff_srv_rate": 0.0,
+  "srv_diff_host_rate": 0.0,
+  "dst_host_count": 255,
+  "dst_host_srv_count": 255,
+  "dst_host_same_srv_rate": 1.0,
+  "dst_host_diff_srv_rate": 0.0,
+  "dst_host_same_src_port_rate": 0.0,
+  "dst_host_srv_diff_host_rate": 0.0,
+  "dst_host_serror_rate": 0.0,
+  "dst_host_srv_serror_rate": 0.0,
+  "dst_host_rerror_rate": 0.0,
+  "dst_host_srv_rerror_rate": 0.0
+}]]

@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nid-frontend
+  namespace: nid
+  labels:
+    app: nid-frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nid-frontend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: nid-frontend
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - nid-frontend
+                topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: nid-frontend
+          image: scc_network_intrusion_detection-frontend:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8501
+
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+
+          livenessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: 8501
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 5
+            timeoutSeconds: 5
+
+          readinessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: 8501
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+            timeoutSeconds: 5
+
+          env:
+            - name: API_URL
+              value: "http://nid-backend-service:8000"

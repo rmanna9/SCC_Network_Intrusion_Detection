@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nid-backend
+  namespace: nid
+  labels:
+    app: nid-backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nid-backend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: nid-backend
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - nid-backend
+                topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: nid-backend
+          image: scc_network_intrusion_detection-backend:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+
+          # Uvicorn con 2 worker — l'inferenza ML è sincrona e bloccante,
+          # troppi worker competono sulle stesse CPU causando context switching.
+          # La scalabilità orizzontale (HPA) è preferibile a quella verticale per worker.
+          command: ["uvicorn", "main:app",
+                    "--host", "0.0.0.0",
+                    "--port", "8000",
+                    "--workers", "1",
+                    "--timeout-keep-alive", "30"]
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "1Gi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 3
+            failureThreshold: 3
+
+          volumeMounts:
+            - name: artifacts
+              mountPath: /app/artifacts
+              readOnly: true
+
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+
+      volumes:
+        - name: artifacts
+          hostPath:
+            path: /artifacts
+            type: Directory

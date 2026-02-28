@@ -112,3 +112,24 @@ class IntrusionDetector:
             result[f"prob_{cls}"] = probas[:, i]
 
         return result
+
+    def predict_batch_raw(self, features_list: list) -> list:
+        """
+        Predice un batch di connessioni da una lista di dizionari.
+        Usato dal batch_worker in main.py.
+        Restituisce una lista di dizionari {prediction, probabilities, description}.
+        """
+        df    = pd.DataFrame(features_list)
+        X     = self._preprocess(df)
+        preds = self.model.predict(X)
+        probas = self.model.predict_proba(X)
+
+        results = []
+        for pred, proba in zip(preds, probas):
+            proba_dict = {cls: float(p) for cls, p in zip(self.classes, proba)}
+            results.append({
+                "prediction":    pred,
+                "probabilities": proba_dict,
+                "description":   CLASS_DESCRIPTIONS.get(pred, CLASS_DESCRIPTIONS["other"]),
+            })
+        return results
