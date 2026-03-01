@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wrk-stress-test
+  namespace: nid
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: wrk
+          image: skandyla/wrk
+          command: ["wrk"]
+          args: ["-t16", "-c5000", "-d120s",
+                 "--timeout", "5000",
+                 "-s", "/scripts/predict.lua",
+                 "http://nid-backend-service:8000/predict"]
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+            limits:
+              cpu: "2000m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: wrk-scripts
+              mountPath: /scripts
+      volumes:
+        - name: wrk-scripts
+          configMap:
+            name: wrk-scripts

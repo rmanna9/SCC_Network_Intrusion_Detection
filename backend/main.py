@@ -11,8 +11,8 @@ import os
 from predictor import IntrusionDetector
 
 # ── Configurazione batch ──
-BATCH_SIZE  = int(os.environ.get("BATCH_SIZE", "64"))
-BATCH_WAIT  = float(os.environ.get("BATCH_WAIT_MS", "5")) / 1000  # ms → s
+BATCH_SIZE  = int(os.environ.get("BATCH_SIZE", "256"))
+BATCH_WAIT  = float(os.environ.get("BATCH_WAIT_MS", "500")) / 1000  # ms → s
 
 # ── Thread pool per inferenza ML ──
 ml_executor = ThreadPoolExecutor(max_workers=int(os.environ.get("ML_WORKERS", "8")))
@@ -48,23 +48,12 @@ async def batch_worker():
         batch_features = []
         batch_futures  = []
 
-        # Aspetta la prima richiesta (blocca finché non arriva qualcosa)
-        try:
-            features, fut = await asyncio.wait_for(request_queue.get(), timeout=1.0)
-            batch_features.append(features)
-            batch_futures.append(fut)
-        except asyncio.TimeoutError:
-            continue
-
-        # Accumula altre richieste per BATCH_WAIT ms o fino a BATCH_SIZE
-        deadline = loop.time() + BATCH_WAIT
-        while len(batch_features) < BATCH_SIZE:
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                break
+        # Accumula richieste per BATCH_WAIT secondi o fino a BATCH_SIZE
+        # Stessa strategia del fraud detection: aspetta fino a 1s per formare batch grandi
+        for _ in range(BATCH_SIZE):
             try:
                 features, fut = await asyncio.wait_for(
-                    request_queue.get(), timeout=remaining
+                    request_queue.get(), timeout=BATCH_WAIT
                 )
                 batch_features.append(features)
                 batch_futures.append(fut)
