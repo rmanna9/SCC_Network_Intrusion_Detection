@@ -1,0 +1,39 @@
+# ingress.yaml — espone solo il frontend all'esterno con HTTPS forzato
+# Il backend è raggiungibile solo internamente (NodePort per test)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nid-ingress
+  namespace: nid
+  annotations:
+    # ── HTTPS forzato ─────────────────────────────────────────────────────────
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"        # redirect HTTP → HTTPS
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"  # forza anche dietro proxy
+
+    # ── ModSecurity WAF ───────────────────────────────────────────────────────
+    nginx.ingress.kubernetes.io/enable-modsecurity: "true"
+    nginx.ingress.kubernetes.io/enable-owasp-core-rules: "true"
+
+    # ── Rate limiting ─────────────────────────────────────────────────────────
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-connections: "10"
+    nginx.ingress.kubernetes.io/limit-req-status-code: "429"
+    nginx.ingress.kubernetes.io/limit-conn-status-code: "429"
+    
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - nid.local
+    secretName: nid-tls-secret   # ← generato da cert-manager
+  rules:
+  - host: nid.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: nid-frontend-service
+            port:
+              number: 8501
