@@ -1,10 +1,30 @@
 import streamlit as st
 import pandas as pd
-import requests
+import httpx
 import os
 
 # ── Configurazione ──
-API_URL = os.getenv("API_URL", "http://localhost:8000")
+API_URL = os.getenv("API_URL", "https://nid-backend-service:8000")
+
+# ── mTLS client — autentica il frontend verso il backend ──
+# I certificati sono montati dal Secret frontend-client-tls-secret
+_CERT_DIR = os.getenv("MTLS_CERT_DIR", "/certs/client")
+_CLIENT_CERT = os.path.join(_CERT_DIR, "tls.crt")
+_CLIENT_KEY  = os.path.join(_CERT_DIR, "tls.key")
+_CA_CERT     = os.path.join(_CERT_DIR, "ca.crt")
+
+def _make_client() -> httpx.Client:
+    """Crea un client httpx con mTLS se i certificati sono disponibili."""
+    if os.path.exists(_CLIENT_CERT):
+        return httpx.Client(
+            cert=(_CLIENT_CERT, _CLIENT_KEY),
+            verify=_CA_CERT,
+            timeout=10.0,
+        )
+    # Fallback senza mTLS (sviluppo locale)
+    return httpx.Client(verify=False, timeout=10.0)
+
+_http = _make_client()
 
 st.set_page_config(
     page_title="Network Intrusion Detection",
@@ -119,7 +139,7 @@ def render_result(result: dict):
 # ── Verifica connessione al backend ──
 def check_backend():
     try:
-        r = requests.get(f"{API_URL}/health", timeout=3)
+        r = _http.get(f"{API_URL}/health")
         return r.status_code == 200
     except Exception:
         return False
@@ -200,13 +220,13 @@ with tab1:
 
         with st.spinner("Analisi in corso..."):
             try:
-                resp = requests.post(f"{API_URL}/predict", json=input_values, timeout=10)
+                resp = _http.post(f"{API_URL}/predict", json=input_values)
                 resp.raise_for_status()
                 result = resp.json()
                 st.markdown("---")
                 st.markdown("### Risultato")
                 render_result(result)
-            except requests.exceptions.HTTPError as e:
+            except httpx.HTTPStatusError as e:
                 st.error(f"❌ Errore API: {resp.json().get('detail', str(e))}")
             except Exception as e:
                 st.error(f"❌ Errore di connessione: {e}")
@@ -234,10 +254,10 @@ with tab2:
 
                 with st.spinner(f"Analisi di {len(df_input)} connessioni..."):
                     try:
-                        resp = requests.post(f"{API_URL}/predict/batch", json=records, timeout=60)
+                        resp = _http.post(f"{API_URL}/predict/batch", json=records, timeout=httpx.Timeout(60.0))
                         resp.raise_for_status()
                         batch_result = resp.json()
-                    except requests.exceptions.HTTPError as e:
+                    except httpx.HTTPStatusError as e:
                         st.error(f"❌ Errore API: {resp.json().get('detail', str(e))}")
                         st.stop()
                     except Exception as e:

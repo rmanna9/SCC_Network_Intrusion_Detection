@@ -1,0 +1,129 @@
+# network-policy.yaml — Isolamento del traffico tra i componenti NID
+#
+# Regole implementate:
+#   1. frontend: accetta traffico solo da NGINX Ingress
+#   2. frontend: può parlare solo con il backend (porta 8000)
+#   3. backend:  accetta traffico solo dal frontend
+#   4. backend:  nessun traffico outbound (no egress)
+#   5. tutto il resto è bloccato per default
+
+---
+# ── 1. Default deny-all per il namespace nid ──────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: nid
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# ── 2. Frontend: ingress da NGINX Ingress Controller ──────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-allow-ingress-nginx
+  namespace: nid
+spec:
+  podSelector:
+    matchLabels:
+      app: nid-frontend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8501
+
+---
+# ── 3. Frontend: egress verso backend e DNS ────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-allow-egress
+  namespace: nid
+spec:
+  podSelector:
+    matchLabels:
+      app: nid-frontend
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: nid-backend
+      ports:
+        - protocol: TCP
+          port: 8000
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# ── 4. Backend: ingress solo dal frontend ──────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-allow-frontend
+  namespace: nid
+spec:
+  podSelector:
+    matchLabels:
+      app: nid-backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: nid-frontend
+      ports:
+        - protocol: TCP
+          port: 8000
+
+---
+# ── 5. Backend: egress solo DNS ───────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-allow-egress-dns
+  namespace: nid
+spec:
+  podSelector:
+    matchLabels:
+      app: nid-backend
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

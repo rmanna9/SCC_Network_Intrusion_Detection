@@ -1,0 +1,48 @@
+# mtls-certificates.yaml — Certificati mTLS per comunicazione frontend → backend
+# Prerequisito: cert-manager.yaml già applicato (CA nid-ca-issuer disponibile)
+
+---
+# Certificato SERVER per il backend
+# Uvicorn lo usa per identificarsi verso il frontend
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: backend-server-tls
+  namespace: nid
+spec:
+  secretName: backend-server-tls-secret
+  duration: 8760h
+  renewBefore: 720h
+  commonName: nid-backend-service
+  dnsNames:
+    - nid-backend-service
+    - nid-backend-service.nid
+    - nid-backend-service.nid.svc.cluster.local
+  usages:
+    - server auth
+    - digital signature
+    - key encipherment
+  issuerRef:
+    name: nid-ca-issuer
+    kind: ClusterIssuer
+
+---
+# Certificato CLIENT per il frontend
+# Il frontend lo presenta al backend per autenticarsi
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: frontend-client-tls
+  namespace: nid
+spec:
+  secretName: frontend-client-tls-secret
+  duration: 8760h
+  renewBefore: 720h
+  commonName: nid-frontend
+  usages:
+    - client auth
+    - digital signature
+    - key encipherment
+  issuerRef:
+    name: nid-ca-issuer
+    kind: ClusterIssuer

@@ -40,14 +40,10 @@ spec:
           ports:
             - containerPort: 8000
 
-          # Uvicorn con 2 worker — l'inferenza ML è sincrona e bloccante,
-          # troppi worker competono sulle stesse CPU causando context switching.
-          # La scalabilità orizzontale (HPA) è preferibile a quella verticale per worker.
-          command: ["uvicorn", "main:app",
-                    "--host", "0.0.0.0",
-                    "--port", "8000",
-                    "--workers", "1",
-                    "--timeout-keep-alive", "30"]
+          # mTLS: Uvicorn presenta certificato server e verifica certificato client
+          # mTLS: run.py crea SSL context con ssl.CERT_REQUIRED
+          # che forza la verifica del certificato client
+          command: ["python3", "run.py"]
 
           resources:
             requests:
@@ -61,6 +57,7 @@ spec:
             httpGet:
               path: /health
               port: 8000
+              scheme: HTTPS
             initialDelaySeconds: 15
             periodSeconds: 10
             failureThreshold: 3
@@ -69,6 +66,7 @@ spec:
             httpGet:
               path: /health
               port: 8000
+              scheme: HTTPS
             initialDelaySeconds: 5
             periodSeconds: 3
             failureThreshold: 3
@@ -76,6 +74,9 @@ spec:
           volumeMounts:
             - name: artifacts
               mountPath: /app/artifacts
+              readOnly: true
+            - name: backend-server-tls
+              mountPath: /certs/server
               readOnly: true
 
           env:
@@ -87,3 +88,13 @@ spec:
           hostPath:
             path: /artifacts
             type: Directory
+        - name: backend-server-tls
+          secret:
+            secretName: backend-server-tls-secret
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+              - key: ca.crt
+                path: ca.crt

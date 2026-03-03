@@ -68,4 +68,23 @@ spec:
 
           env:
             - name: API_URL
-              value: "http://nid-backend-service:8000"
+              value: "https://nid-backend-service:8000"
+            - name: MTLS_CERT_DIR
+              value: "/certs/client"
+
+          volumeMounts:
+            - name: frontend-client-tls
+              mountPath: /certs/client
+              readOnly: true
+
+      volumes:
+        - name: frontend-client-tls
+          secret:
+            secretName: frontend-client-tls-secret
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+              - key: ca.crt
+                path: ca.crt
