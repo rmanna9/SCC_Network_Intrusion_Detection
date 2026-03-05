@@ -1,0 +1,138 @@
+# audit-policy.yaml — Policy di audit per il Kubernetes API server
+#
+# Livelli di audit disponibili:
+#   None     — non registra l'evento
+#   Metadata — registra solo metadata (utente, timestamp, risorsa, verbo)
+#   Request  — metadata + request body
+#   RequestResponse — metadata + request body + response body
+#
+# Strategia adottata:
+#   - Operazioni critiche (secrets, RBAC, auth) → RequestResponse
+#   - Operazioni sul namespace nid (pod, deploy) → Request
+#   - Health check e read-only → Metadata o None
+#   - Tutto il resto → Metadata
+
+apiVersion: audit.k8s.io/v1
+kind: Policy
+
+# Non registrare le richieste nei seguenti stage (troppo verbose)
+omitStages:
+  - RequestReceived
+
+rules:
+
+  # ── 1. Non registrare health check e leader election (rumore) ──
+  - level: None
+    users: ["system:kube-proxy"]
+    verbs: ["watch"]
+    resources:
+      - group: ""
+        resources: ["endpoints", "services", "services/status"]
+
+  - level: None
+    users: ["kubelet"]
+    verbs: ["get"]
+    resources:
+      - group: ""
+        resources: ["nodes", "nodes/status"]
+
+  - level: None
+    userGroups: ["system:nodes"]
+    verbs: ["get"]
+    resources:
+      - group: ""
+        resources: ["nodes", "nodes/status"]
+
+  - level: None
+    users:
+      - system:kube-controller-manager
+      - system:kube-scheduler
+      - system:serviceaccount:kube-system:endpoint-controller
+    verbs: ["get", "update"]
+    namespaces: ["kube-system"]
+    resources:
+      - group: ""
+        resources: ["endpoints"]
+
+  - level: None
+    users: ["system:apiserver"]
+    verbs: ["get"]
+    resources:
+      - group: ""
+        resources: ["namespaces", "namespaces/status", "namespaces/finalize"]
+
+  # ── 2. Non registrare read-only su risorse non sensibili ──
+  - level: None
+    verbs: ["get", "list", "watch"]
+    resources:
+      - group: ""
+        resources: ["events"]
+
+  # ── 3. CRITICO — Secrets: registra tutto incluso il body ──
+  # I secret contengono certificati TLS e credenziali — ogni accesso deve essere tracciato
+  - level: RequestResponse
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    resources:
+      - group: ""
+        resources: ["secrets"]
+
+  # ── 4. CRITICO — RBAC: registra modifiche a ruoli e binding ──
+  - level: RequestResponse
+    verbs: ["create", "update", "patch", "delete"]
+    resources:
+      - group: "rbac.authorization.k8s.io"
+        resources:
+          - clusterroles
+          - clusterrolebindings
+          - roles
+          - rolebindings
+
+  # ── 5. CRITICO — Autenticazione e autorizzazione ──
+  - level: RequestResponse
+    verbs: ["create"]
+    resources:
+      - group: "authentication.k8s.io"
+        resources: ["tokenreviews"]
+      - group: "authorization.k8s.io"
+        resources: ["subjectaccessreviews", "localsubjectaccessreviews"]
+
+  # ── 6. CRITICO — NetworkPolicy: modifiche all'isolamento di rete ──
+  - level: RequestResponse
+    verbs: ["create", "update", "patch", "delete"]
+    resources:
+      - group: "networking.k8s.io"
+        resources: ["networkpolicies"]
+
+  # ── 7. IMPORTANTE — Pod e deployment nel namespace nid ──
+  # Traccia creazione/modifica dei pod applicativi
+  - level: Request
+    verbs: ["create", "update", "patch", "delete"]
+    namespaces: ["nid"]
+    resources:
+      - group: ""
+        resources: ["pods", "pods/exec", "pods/portforward"]
+      - group: "apps"
+        resources: ["deployments", "replicasets"]
+
+  # ── 8. IMPORTANTE — Exec dentro i container (molto sensibile) ──
+  - level: RequestResponse
+    verbs: ["create"]
+    resources:
+      - group: ""
+        resources: ["pods/exec", "pods/attach"]
+
+  # ── 9. IMPORTANTE — ConfigMap nel namespace nid ──
+  - level: Request
+    verbs: ["create", "update", "patch", "delete"]
+    namespaces: ["nid"]
+    resources:
+      - group: ""
+        resources: ["configmaps"]
+
+  # ── 10. Tutto il resto — solo metadata ──
+  - level: Metadata
+    verbs: ["create", "update", "patch", "delete"]
+
+  # ── 11. Read-only non coperto sopra — niente ──
+  - level: None
+    verbs: ["get", "list", "watch"]

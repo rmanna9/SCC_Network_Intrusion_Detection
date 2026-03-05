@@ -20,6 +20,13 @@ spec:
       labels:
         app: nid-frontend
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -39,6 +46,11 @@ spec:
           imagePullPolicy: Never
           ports:
             - containerPort: 8501
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
 
           resources:
             requests:

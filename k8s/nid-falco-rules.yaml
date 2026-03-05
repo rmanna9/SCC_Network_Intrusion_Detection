@@ -1,0 +1,142 @@
+# nid_rules.yaml — Regole Falco personalizzate per il sistema NID
+#
+# Struttura di ogni regola:
+#   rule:    nome della regola
+#   desc:    descrizione
+#   condition: espressione booleana sugli eventi
+#   output:  messaggio di alert (con variabili)
+#   priority: WARNING / ERROR / CRITICAL
+#   tags:    categorie
+
+# ──────────────────────────────────────────────
+# MACRO: identifica i container NID
+# ──────────────────────────────────────────────
+- macro: nid_container
+  condition: >
+    container.image.repository contains "nid" or
+    container.name in (nid-backend, nid-frontend)
+
+- macro: nid_backend
+  condition: container.name = "nid-backend"
+
+- macro: nid_frontend
+  condition: container.name = "nid-frontend"
+
+# ──────────────────────────────────────────────
+# REGOLA 1: Shell interattiva dentro un container NID
+# Rileva: kubectl exec ... bash/sh
+# ──────────────────────────────────────────────
+- rule: Shell aperta in container NID
+  desc: >
+    Qualcuno ha aperto una shell interattiva in un container NID.
+    Puo indicare accesso non autorizzato o debug in produzione.
+  condition: >
+    spawned_process and
+    nid_container and
+    proc.name in (bash, sh, zsh, dash, fish)
+  output: >
+    SHELL APERTA in container NID
+    (user=%user.name container=%container.name image=%container.image.repository
+     cmd=%proc.cmdline pid=%proc.pid parent=%proc.pname)
+  priority: WARNING
+  tags: [nid, shell, exec]
+
+# ──────────────────────────────────────────────
+# REGOLA 2: Esecuzione di tool di rete sospetti
+# Rileva: wget, curl, nc, nmap dentro i container
+# ──────────────────────────────────────────────
+- rule: Tool di rete in container NID
+  desc: >
+    Eseguito un tool di rete (wget/curl/nc) dentro un container NID.
+    Puo indicare tentativo di exfiltration o download di malware.
+  condition: >
+    spawned_process and
+    nid_container and
+    proc.name in (wget, curl, nc, ncat, nmap, netcat, socat)
+  output: >
+    TOOL DI RETE in container NID
+    (user=%user.name container=%container.name
+     cmd=%proc.cmdline pid=%proc.pid)
+  priority: ERROR
+  tags: [nid, network, suspicious]
+
+# ──────────────────────────────────────────────
+# REGOLA 3: Lettura file sensibili
+# Rileva: accesso a /etc/passwd, /etc/shadow, chiavi SSH
+# ──────────────────────────────────────────────
+- rule: Lettura file sensibili in container NID
+  desc: >
+    Un processo ha letto un file di sistema sensibile dentro un container NID.
+  condition: >
+    open_read and
+    nid_container and
+    fd.name in (/etc/passwd, /etc/shadow, /etc/sudoers, /root/.ssh/id_rsa,
+                /root/.ssh/authorized_keys, /etc/kubernetes/pki/ca.key)
+  output: >
+    FILE SENSIBILE LETTO in container NID
+    (user=%user.name file=%fd.name container=%container.name
+     cmd=%proc.cmdline)
+  priority: ERROR
+  tags: [nid, filesystem, sensitive]
+
+# ──────────────────────────────────────────────
+# REGOLA 4: Scrittura fuori dalle directory permesse
+# Il backend deve scrivere solo in /tmp e /app
+# ──────────────────────────────────────────────
+- rule: Scrittura non autorizzata in container NID
+  desc: >
+    Un container NID ha scritto in una directory non prevista.
+    Il backend legge solo da /app/artifacts e /certs.
+  condition: >
+    open_write and
+    nid_container and
+    not fd.name startswith /tmp and
+    not fd.name startswith /app and
+    not fd.name startswith /proc and
+    not fd.name startswith /dev
+  output: >
+    SCRITTURA NON AUTORIZZATA in container NID
+    (user=%user.name file=%fd.name container=%container.name
+     cmd=%proc.cmdline)
+  priority: WARNING
+  tags: [nid, filesystem, write]
+
+# ──────────────────────────────────────────────
+# REGOLA 5: Processo inatteso nel backend
+# Il backend deve eseguire solo python3
+# ──────────────────────────────────────────────
+- rule: Processo inatteso in NID backend
+  desc: >
+    Avviato un processo non previsto nel container backend.
+    Il backend dovrebbe eseguire solo python3/uvicorn.
+  condition: >
+    spawned_process and
+    nid_backend and
+    not proc.name in (python3, python, uvicorn, run.py) and
+    not proc.pname in (python3, python, uvicorn)
+  output: >
+    PROCESSO INATTESO nel backend NID
+    (user=%user.name proc=%proc.name parent=%proc.pname
+     cmd=%proc.cmdline container=%container.name)
+  priority: WARNING
+  tags: [nid, process, backend]
+
+# ──────────────────────────────────────────────
+# REGOLA 6: Accesso ai certificati mTLS
+# I certificati in /certs non devono essere letti da processi non autorizzati
+# ──────────────────────────────────────────────
+- rule: Accesso inatteso ai certificati mTLS
+  desc: >
+    Un processo non autorizzato ha letto i certificati mTLS.
+    Solo uvicorn/python3 dovrebbe accedere a /certs.
+  condition: >
+    open_read and
+    nid_container and
+    fd.name startswith /certs and
+    not proc.name in (python3, python, uvicorn)
+  output: >
+    ACCESSO AI CERTIFICATI mTLS
+    (user=%user.name proc=%proc.name file=%fd.name
+     container=%container.name cmd=%proc.cmdline)
+  priority: CRITICAL
+  tags: [nid, mtls, certificates]

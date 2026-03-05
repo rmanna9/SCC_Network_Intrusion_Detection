@@ -1,0 +1,44 @@
+# falco-values.yaml — Configurazione Falco per cluster NID su Kind/WSL2
+
+driver:
+  kind: modern_ebpf
+
+falco:
+  grpc:
+    enabled: false
+  grpc_output:
+    enabled: false
+  stdout_output:
+    enabled: true
+  json_output: true
+  json_include_output_property: true
+  priority: warning
+  rules_files:
+    - /etc/falco/falco_rules.yaml
+    - /etc/falco/falco_rules.local.yaml
+    - /etc/falco/rules.d/nid_rules.yaml
+
+# Parametri corretti per montare volumi nel chart Falco
+mounts:
+  volumes:
+    - name: nid-rules
+      configMap:
+        name: falco-nid-rules
+  volumeMounts:
+    - name: nid-rules
+      mountPath: /etc/falco/rules.d
+
+falcoctl:
+  artifact:
+    install:
+      enabled: true
+    follow:
+      enabled: true
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1024Mi

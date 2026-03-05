@@ -20,6 +20,13 @@ spec:
       labels:
         app: nid-backend
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -39,6 +46,11 @@ spec:
           imagePullPolicy: Never
           ports:
             - containerPort: 8000
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
 
           # mTLS: Uvicorn presenta certificato server e verifica certificato client
           # mTLS: run.py crea SSL context con ssl.CERT_REQUIRED
