@@ -100,7 +100,8 @@ jobs:
       - name: Build e Push Backend (FastAPI)
         uses: docker/build-push-action@v5
         with:
-          context: ./backend
+          context: .                  # root del progetto (serve per includere artifacts/)
+          file: ./backend/Dockerfile  # Dockerfile resta in backend/
           push: true
           tags: ${{ env.BACKEND_IMAGE }}
 
@@ -225,11 +226,14 @@ jobs:
           echo "=== Events nel namespace nid ==="
           kubectl get events -n nid --sort-by='.lastTimestamp' || true
 
-          echo "=== Attendo i Pod ==="
+          echo "=== Attendo che i Pod vengano creati (30s) ==="
+          sleep 30
+
+          echo "=== Attendo che i Pod siano Ready ==="
           kubectl wait --for=condition=ready pod \
             --selector=app=nid-backend \
             --namespace=nid \
-            --timeout=120s || true
+            --timeout=120s
 
           kubectl get pods -n nid
 
@@ -257,26 +261,28 @@ jobs:
           docker run -d \
             --name nids-backend \
             -p 8000:8000 \
-            -v ${{ github.workspace }}/artifacts:/app/artifacts:ro \
             ${{ env.BACKEND_IMAGE }}
-          echo "Attendo che FastAPI sia pronto..."
-          for i in $(seq 1 30); do
-            if curl -s http://localhost:8000/health | grep -q "ok\|healthy"; then
+
+          echo "Attendo avvio FastAPI (caricamento modelli ML)..."
+          sleep 20
+          for i in $(seq 1 40); do
+            if curl -s http://localhost:8000/health | grep -q "ok\|healthy\|status"; then
               echo "Backend pronto!"
               break
             fi
-            echo "  Tentativo $i/30..."
-            sleep 3
+            echo "  Tentativo $i/40..."
+            sleep 5
           done
+          echo "Risposta health check:"
+          curl -s http://localhost:8000/health || echo "Health check non risponde"
 
       - name: Esegui Nuclei sul Backend FastAPI
-        uses: projectdiscovery/nuclei-action@main
+        uses: projectdiscovery/nuclei-action@v3
         with:
           target: http://localhost:8000
           flags: >-
             -tags http,misconfig,exposure
             -severity low,medium,high,critical
-            -json
             -o nuclei-report.json
 
       - name: Test aggiuntivi sugli endpoint specifici
