@@ -240,7 +240,7 @@ jobs:
       - name: Verifica che i Pod siano Running
         run: |
           kubectl wait --for=condition=ready pod \
-            --selector=app=nids-backend \
+            --selector=app=nid-backend \
             --namespace=nid \
             --timeout=120s
           kubectl get pods -n nid
