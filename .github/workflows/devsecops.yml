@@ -1,0 +1,324 @@
+# ============================================================
+# DevSecOps Pipeline — Network Intrusion Detection (NSL-KDD)
+# GitHub Actions equivalent of the GitLab CI/CD from the course
+#
+# STAGES (in ordine):
+#   1. secrets      → Gitleaks  (cerca credenziali hardcoded)
+#   2. sast         → Semgrep   (analisi statica del codice)
+#   3. build        → Docker    (costruisce e pusha le immagini)
+#   4. scan-image   → Trivy     (scansiona le immagini per CVE)
+#   5. deploy       → kind/k8s  (aggiorna il cluster Kubernetes)
+#   6. dast         → Nuclei    (test dinamici sull'app live)
+#
+# SETUP NECESSARIO — aggiungi questi Secret su GitHub:
+#   Settings → Secrets and variables → Actions → New repository secret
+#
+#   GHCR_TOKEN   → un Personal Access Token con scope "write:packages"
+#                  (GitHub → Settings → Developer settings → PAT)
+#   GHCR_USER    → il tuo username GitHub (es. mario-rossi)
+#
+# ============================================================
+
+name: DevSecOps Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]   # esegui ad ogni push su main
+  pull_request:
+    branches: [ "main", "master" ]   # esegui anche sulle PR
+
+# Variabili globali usate da tutti gli stage
+env:
+  # GitHub Container Registry — dove vengono caricate le immagini Docker
+  # ghcr.io/<tuo-username>/<repo-name>/backend:abc1234
+  BACKEND_IMAGE:  ghcr.io/${{ github.repository_owner }}/nids-backend:${{ github.sha }}
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/nids-frontend:${{ github.sha }}
+
+# ============================================================
+# JOBS
+# ============================================================
+jobs:
+
+  # ----------------------------------------------------------
+  # STAGE 1: SECRET DETECTION con Gitleaks
+  # Scansiona tutto il codice (inclusa la storia Git) cercando
+  # API key, password, token scritti per sbaglio nel codice.
+  # ----------------------------------------------------------
+  secret-scan:
+    name: "1 · Secret Detection (Gitleaks)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout codice
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # serve tutta la storia Git, non solo l'ultimo commit
+
+      - name: Esegui Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Se trova un segreto → la pipeline si blocca qui ❌
+        # Nessun segreto trovato → si procede ✅
+
+
+  # ----------------------------------------------------------
+  # STAGE 2: SAST con Semgrep
+  # Analizza il codice sorgente SENZA eseguirlo, cercando
+  # pattern pericolosi (XSS, CORS aperti, MD5, eval(), ecc.)
+  # ----------------------------------------------------------
+  sast-scan:
+    name: "2 · SAST (Semgrep)"
+    runs-on: ubuntu-latest
+    needs: secret-scan              # parte solo se lo stage 1 è OK
+    steps:
+      - name: Checkout codice
+        uses: actions/checkout@v4
+
+      - name: Esegui Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/python
+            p/dockerfile
+            p/owasp-top-ten
+          # p/python      → pattern di sicurezza per Python/FastAPI/Streamlit
+          # p/dockerfile  → controlla i tuoi Dockerfile (USER root, COPY . ., ecc.)
+          # p/owasp-top-ten → le 10 vulnerabilità web più comuni
+
+      - name: Salva report Semgrep
+        if: always()               # salva il report anche se ci sono errori
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-report
+          path: semgrep.sarif
+          retention-days: 7
+
+
+  # ----------------------------------------------------------
+  # STAGE 3: BUILD immagini Docker
+  # Costruisce backend e frontend e li carica su
+  # GitHub Container Registry (ghcr.io) — equivalente del
+  # GitLab Registry usato nel corso.
+  # ----------------------------------------------------------
+  build:
+    name: "3 · Build Docker Images"
+    runs-on: ubuntu-latest
+    needs: sast-scan                # parte solo se lo stage 2 è OK
+    steps:
+      - name: Checkout codice
+        uses: actions/checkout@v4
+
+      - name: Login a GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USER }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Build e Push Backend (FastAPI)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend        # usa il Dockerfile in backend/
+          push: true
+          tags: ${{ env.BACKEND_IMAGE }}
+
+      - name: Build e Push Frontend (Streamlit)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend       # usa il Dockerfile in frontend/
+          push: true
+          tags: ${{ env.FRONTEND_IMAGE }}
+
+
+  # ----------------------------------------------------------
+  # STAGE 4: CONTAINER SECURITY con Trivy
+  # Scansiona le immagini appena costruite per trovare CVE
+  # nei pacchetti OS e Python — stessa funzione di Docker Scout
+  # che hai già usato manualmente negli Step D/E del progetto.
+  # ----------------------------------------------------------
+  scan-image:
+    name: "4 · Container Scan (Trivy)"
+    runs-on: ubuntu-latest
+    needs: build                    # parte solo dopo il build
+    strategy:
+      matrix:
+        # Scansiona entrambe le immagini in parallelo
+        image:
+          - name: "Backend"
+            tag: ${{ needs.build.outputs.backend_image }}
+          - name: "Frontend"
+            tag: ${{ needs.build.outputs.frontend_image }}
+    steps:
+      - name: Login a GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USER }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Scansione Trivy — ${{ matrix.image.name }}
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.BACKEND_IMAGE }}
+          format: "table"
+          exit-code: "1"            # blocca la pipeline se trova CRITICAL
+          severity: "CRITICAL"      # blocca solo su CRITICAL (tu hai già 0 Critical!)
+          ignore-unfixed: true      # ignora CVE senza fix disponibile (come nel tuo step E)
+
+      - name: Salva report Trivy
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report-${{ matrix.image.name }}
+          path: trivy-results.sarif
+          retention-days: 7
+
+
+  # ----------------------------------------------------------
+  # STAGE 5: DEPLOY su kind (Kubernetes locale)
+  # Aggiorna i Deployment Kubernetes con le nuove immagini.
+  # Nota: kind è locale, quindi questo stage funziona solo
+  # su un self-hosted runner sul tuo PC. Su GitHub-hosted
+  # runner (ubuntu-latest) serve un cluster remoto.
+  # Per ora fa una simulazione — vedi il commento sotto.
+  # ----------------------------------------------------------
+  deploy:
+    name: "5 · Deploy su Kubernetes (kind)"
+    runs-on: ubuntu-latest
+    needs: scan-image               # parte solo se le immagini sono sicure
+    if: github.ref == 'refs/heads/main'   # solo su push a main, non su PR
+    steps:
+      - name: Checkout codice
+        uses: actions/checkout@v4
+
+      # kind non è disponibile su runner GitHub-hosted per cluster "reali",
+      # ma puoi creare un cluster temporaneo per testare il deploy:
+      - name: Installa kind e kubectl
+        run: |
+          # Installa kind
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+          # Installa kubectl
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/kubectl
+
+      - name: Crea cluster kind temporaneo
+        run: kind create cluster --name nids-ci
+
+      - name: Applica manifest Kubernetes
+        run: |
+          # Sostituisce il tag dell'immagine nei manifest con quello del commit attuale
+          sed -i "s|IMAGE_BACKEND_PLACEHOLDER|${{ env.BACKEND_IMAGE }}|g" kubernetes/*.yaml
+          sed -i "s|IMAGE_FRONTEND_PLACEHOLDER|${{ env.FRONTEND_IMAGE }}|g" kubernetes/*.yaml
+
+          # Applica tutti i manifest nella cartella kubernetes/
+          kubectl apply -f kubernetes/
+
+      - name: Verifica che i Pod siano Running
+        run: |
+          kubectl wait --for=condition=ready pod \
+            --selector=app=nids-backend \
+            --timeout=120s
+          kubectl get pods
+
+
+  # ----------------------------------------------------------
+  # STAGE 6: DAST con Nuclei
+  # Test dinamici sull'applicazione in esecuzione.
+  # Prova a colpire gli endpoint FastAPI con payload malevoli
+  # e verifica le risposte — come farebbe un attaccante.
+  # ----------------------------------------------------------
+  dast-scan:
+    name: "6 · DAST (Nuclei)"
+    runs-on: ubuntu-latest
+    needs: deploy                   # parte solo dopo il deploy
+    steps:
+      - name: Checkout codice
+        uses: actions/checkout@v4
+
+      # Avvia l'app localmente per poterla testare con Nuclei
+      - name: Avvia Backend FastAPI (per il test)
+        run: |
+          docker run -d \
+            --name nids-backend \
+            -p 8000:8000 \
+            ${{ env.BACKEND_IMAGE }}
+
+          # Aspetta che FastAPI sia pronto (health check)
+          echo "Attendo che FastAPI sia pronto..."
+          for i in $(seq 1 30); do
+            if curl -s http://localhost:8000/health | grep -q "ok\|healthy"; then
+              echo "✅ Backend pronto!"
+              break
+            fi
+            echo "  Tentativo $i/30..."
+            sleep 3
+          done
+
+      - name: Esegui Nuclei sul Backend FastAPI
+        uses: projectdiscovery/nuclei-action@main
+        with:
+          target: http://localhost:8000
+          flags: >-
+            -tags http,misconfig,exposure
+            -severity low,medium,high,critical
+            -json
+            -o nuclei-report.json
+
+      - name: Test aggiuntivi sugli endpoint specifici
+        run: |
+          echo "=== Test endpoint /health ==="
+          curl -s http://localhost:8000/health
+
+          echo ""
+          echo "=== Test endpoint /predict con input valido ==="
+          curl -s -X POST http://localhost:8000/predict \
+            -H "Content-Type: application/json" \
+            -d '{"duration": 0, "protocol_type": "tcp", "service": "http",
+                 "flag": "SF", "src_bytes": 181, "dst_bytes": 5450,
+                 "land": 0, "wrong_fragment": 0, "urgent": 0,
+                 "hot": 0, "num_failed_logins": 0, "logged_in": 1,
+                 "num_compromised": 0, "root_shell": 0, "su_attempted": 0,
+                 "num_root": 0, "num_file_creations": 0, "num_shells": 0,
+                 "num_access_files": 0, "num_outbound_cmds": 0,
+                 "is_host_login": 0, "is_guest_login": 0, "count": 8,
+                 "srv_count": 8, "serror_rate": 0.0, "srv_serror_rate": 0.0,
+                 "rerror_rate": 0.0, "srv_rerror_rate": 0.0,
+                 "same_srv_rate": 1.0, "diff_srv_rate": 0.0,
+                 "srv_diff_host_rate": 0.0, "dst_host_count": 9,
+                 "dst_host_srv_count": 9, "dst_host_same_srv_rate": 1.0,
+                 "dst_host_diff_srv_rate": 0.0,
+                 "dst_host_same_src_port_rate": 0.11,
+                 "dst_host_srv_diff_host_rate": 0.0,
+                 "dst_host_serror_rate": 0.0,
+                 "dst_host_srv_serror_rate": 0.0,
+                 "dst_host_rerror_rate": 0.0,
+                 "dst_host_srv_rerror_rate": 0.0}'
+
+          echo ""
+          echo "=== Test input malformato (dovrebbe rispondere 422) ==="
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST http://localhost:8000/predict \
+            -H "Content-Type: application/json" \
+            -d '{"campo_inesistente": "valore_random"}')
+          echo "HTTP Status: $RESPONSE"
+          if [ "$RESPONSE" = "422" ]; then
+            echo "✅ Validazione input corretta (422 Unprocessable Entity)"
+          else
+            echo "⚠️  Risposta inattesa: $RESPONSE"
+          fi
+
+      - name: Salva report Nuclei
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuclei-report
+          path: nuclei-report.json
+          retention-days: 7
+
+      - name: Ferma il container di test
+        if: always()
+        run: docker stop nids-backend && docker rm nids-backend
