@@ -9,7 +9,7 @@ spec:
     spec:
       restartPolicy: Never
       containers:
-        - name: wrk
+        - name: wrk # nosemgrep
           image: skandyla/wrk
           command: ["wrk"]
           args: ["-t16", "-c5000", "-d120s",
