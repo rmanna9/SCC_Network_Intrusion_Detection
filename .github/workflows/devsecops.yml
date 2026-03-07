@@ -214,15 +214,36 @@ jobs:
           sed -i "s|IMAGE_BACKEND_PLACEHOLDER|${{ env.BACKEND_IMAGE }}|g" k8s/*.yaml
           sed -i "s|IMAGE_FRONTEND_PLACEHOLDER|${{ env.FRONTEND_IMAGE }}|g" k8s/*.yaml
 
-          # Applica tutti i manifest nella cartella k8s/
-          kubectl apply -f k8s/
+          # 1. Prima crea il namespace (deve esistere prima dei deployment)
+          kubectl apply -f k8s/namespace.yaml
+          kubectl wait --for=jsonpath='{.status.phase}'=Active \
+            namespace/nid --timeout=30s
+
+          # 2. Applica i manifest base dell'applicazione
+          kubectl apply -f k8s/backend-deployment.yaml
+          kubectl apply -f k8s/backend-service.yaml
+          kubectl apply -f k8s/frontend-deployment.yaml
+          kubectl apply -f k8s/frontend-service.yaml
+
+          # 3. Manifest opzionali (non bloccano se falliscono)
+          kubectl apply -f k8s/backend-hpa.yaml    || true
+          kubectl apply -f k8s/frontend-hpa.yaml   || true
+          kubectl apply -f k8s/metric-server.yaml  || true
+
+          # 4. Skippa i file che richiedono componenti esterni non presenti in CI:
+          #    - ingress.yaml        → richiede NGINX Ingress Controller
+          #    - cert-manager.yaml   → richiede cert-manager CRDs
+          #    - falco               → richiede Falco installato
+          #    - audit-policy.yaml   → configurazione audit API server
+          echo "ℹ️  Skippati: ingress.yaml, cert-manager.yaml, falco, audit-policy (richiedono componenti esterni)"
 
       - name: Verifica che i Pod siano Running
         run: |
           kubectl wait --for=condition=ready pod \
             --selector=app=nids-backend \
+            --namespace=nid \
             --timeout=120s
-          kubectl get pods
+          kubectl get pods -n nid
 
 
   # ----------------------------------------------------------
