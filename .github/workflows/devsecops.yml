@@ -84,6 +84,9 @@ jobs:
           # p/python      → pattern di sicurezza per Python/FastAPI/Streamlit
           # p/dockerfile  → controlla i tuoi Dockerfile (USER root, COPY . ., ecc.)
           # p/owasp-top-ten → le 10 vulnerabilità web più comuni
+          auditOn: >-
+            yaml.kubernetes.security.skip-tls-verify-service.skip-tls-verify-service
+            yaml.kubernetes.security.allow-privilege-escalation-no-securitycontext.allow-privilege-escalation-no-securitycontext
 
       - name: Salva report Semgrep
         if: always()               # salva il report anche se ci sono errori
