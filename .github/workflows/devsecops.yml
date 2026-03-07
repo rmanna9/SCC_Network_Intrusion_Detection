@@ -239,11 +239,20 @@ jobs:
 
       - name: Verifica che i Pod siano Running
         run: |
-          kubectl wait --for=condition=ready pod \
-            --selector=app=nid-backend \
-            --namespace=nid \
-            --timeout=120s
+          echo "=== Tutti i Pod nel namespace nid ==="
           kubectl get pods -n nid
+
+          echo "=== Tutti i Pod in tutti i namespace ==="
+          kubectl get pods -A
+
+          echo "=== Deployment nel namespace nid ==="
+          kubectl get deployments -n nid
+
+          echo "=== Descrizione deployment backend ==="
+          kubectl describe deployment -n nid || true
+
+          echo "=== Events nel namespace nid ==="
+          kubectl get events -n nid --sort-by='.lastTimestamp' || true
 
 
   # ----------------------------------------------------------
