@@ -40,6 +40,8 @@ spec:
                         - nid-frontend
                 topologyKey: kubernetes.io/hostname
 
+      imagePullSecrets:
+        - name: ghcr-secret
       containers:
         - name: nid-frontend
           image: scc_network_intrusion_detection-frontend:latest

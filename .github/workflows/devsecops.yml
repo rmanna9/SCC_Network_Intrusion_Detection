@@ -23,26 +23,18 @@ name: DevSecOps Pipeline
 
 on:
   push:
-    branches: [ "main", "master" ]   # esegui ad ogni push su main
+    branches: [ "main", "master" ]
   pull_request:
-    branches: [ "main", "master" ]   # esegui anche sulle PR
+    branches: [ "main", "master" ]
 
-# Variabili globali usate da tutti gli stage
 env:
-  # GitHub Container Registry — dove vengono caricate le immagini Docker
-  # ghcr.io/<tuo-username>/<repo-name>/backend:abc1234
   BACKEND_IMAGE:  ghcr.io/${{ github.repository_owner }}/nids-backend:${{ github.sha }}
   FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/nids-frontend:${{ github.sha }}
 
-# ============================================================
-# JOBS
-# ============================================================
 jobs:
 
   # ----------------------------------------------------------
   # STAGE 1: SECRET DETECTION con Gitleaks
-  # Scansiona tutto il codice (inclusa la storia Git) cercando
-  # API key, password, token scritti per sbaglio nel codice.
   # ----------------------------------------------------------
   secret-scan:
     name: "1 · Secret Detection (Gitleaks)"
@@ -51,25 +43,21 @@ jobs:
       - name: Checkout codice
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0          # serve tutta la storia Git, non solo l'ultimo commit
+          fetch-depth: 0
 
       - name: Esegui Gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # Se trova un segreto → la pipeline si blocca qui ❌
-        # Nessun segreto trovato → si procede ✅
 
 
   # ----------------------------------------------------------
   # STAGE 2: SAST con Semgrep
-  # Analizza il codice sorgente SENZA eseguirlo, cercando
-  # pattern pericolosi (XSS, CORS aperti, MD5, eval(), ecc.)
   # ----------------------------------------------------------
   sast-scan:
     name: "2 · SAST (Semgrep)"
     runs-on: ubuntu-latest
-    needs: secret-scan              # parte solo se lo stage 1 è OK
+    needs: secret-scan
     steps:
       - name: Checkout codice
         uses: actions/checkout@v4
@@ -81,12 +69,9 @@ jobs:
             p/python
             p/dockerfile
             p/owasp-top-ten
-          # p/python      → pattern di sicurezza per Python/FastAPI/Streamlit
-          # p/dockerfile  → controlla i tuoi Dockerfile (USER root, COPY . ., ecc.)
-          # p/owasp-top-ten → le 10 vulnerabilità web più comuni
 
       - name: Salva report Semgrep
-        if: always()               # salva il report anche se ci sono errori
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: semgrep-report
@@ -96,14 +81,11 @@ jobs:
 
   # ----------------------------------------------------------
   # STAGE 3: BUILD immagini Docker
-  # Costruisce backend e frontend e li carica su
-  # GitHub Container Registry (ghcr.io) — equivalente del
-  # GitLab Registry usato nel corso.
   # ----------------------------------------------------------
   build:
     name: "3 · Build Docker Images"
     runs-on: ubuntu-latest
-    needs: sast-scan                # parte solo se lo stage 2 è OK
+    needs: sast-scan
     steps:
       - name: Checkout codice
         uses: actions/checkout@v4
@@ -118,31 +100,27 @@ jobs:
       - name: Build e Push Backend (FastAPI)
         uses: docker/build-push-action@v5
         with:
-          context: ./backend        # usa il Dockerfile in backend/
+          context: ./backend
           push: true
           tags: ${{ env.BACKEND_IMAGE }}
 
       - name: Build e Push Frontend (Streamlit)
         uses: docker/build-push-action@v5
         with:
-          context: ./frontend       # usa il Dockerfile in frontend/
+          context: ./frontend
           push: true
           tags: ${{ env.FRONTEND_IMAGE }}
 
 
   # ----------------------------------------------------------
   # STAGE 4: CONTAINER SECURITY con Trivy
-  # Scansiona le immagini appena costruite per trovare CVE
-  # nei pacchetti OS e Python — stessa funzione di Docker Scout
-  # che hai già usato manualmente negli Step D/E del progetto.
   # ----------------------------------------------------------
   scan-image:
     name: "4 · Container Scan (Trivy)"
     runs-on: ubuntu-latest
-    needs: build                    # parte solo dopo il build
+    needs: build
     strategy:
       matrix:
-        # Scansiona entrambe le immagini in parallelo
         image:
           - name: "Backend"
             tag: ${{ needs.build.outputs.backend_image }}
@@ -161,9 +139,9 @@ jobs:
         with:
           image-ref: ${{ env.BACKEND_IMAGE }}
           format: "table"
-          exit-code: "1"            # blocca la pipeline se trova CRITICAL
-          severity: "CRITICAL"      # blocca solo su CRITICAL (tu hai già 0 Critical!)
-          ignore-unfixed: true      # ignora CVE senza fix disponibile (come nel tuo step E)
+          exit-code: "1"
+          severity: "CRITICAL"
+          ignore-unfixed: true
 
       - name: Salva report Trivy
         if: always()
@@ -176,31 +154,22 @@ jobs:
 
   # ----------------------------------------------------------
   # STAGE 5: DEPLOY su kind (Kubernetes locale)
-  # Aggiorna i Deployment Kubernetes con le nuove immagini.
-  # Nota: kind è locale, quindi questo stage funziona solo
-  # su un self-hosted runner sul tuo PC. Su GitHub-hosted
-  # runner (ubuntu-latest) serve un cluster remoto.
-  # Per ora fa una simulazione — vedi il commento sotto.
   # ----------------------------------------------------------
   deploy:
     name: "5 · Deploy su Kubernetes (kind)"
     runs-on: ubuntu-latest
-    needs: scan-image               # parte solo se le immagini sono sicure
-    if: github.ref == 'refs/heads/main'   # solo su push a main, non su PR
+    needs: scan-image
+    if: github.ref == 'refs/heads/main'
     steps:
       - name: Checkout codice
         uses: actions/checkout@v4
 
-      # kind non è disponibile su runner GitHub-hosted per cluster "reali",
-      # ma puoi creare un cluster temporaneo per testare il deploy:
       - name: Installa kind e kubectl
         run: |
-          # Installa kind
           curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
           chmod +x ./kind
           sudo mv ./kind /usr/local/bin/kind
 
-          # Installa kubectl
           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           chmod +x kubectl
           sudo mv kubectl /usr/local/bin/kubectl
@@ -210,57 +179,72 @@ jobs:
 
       - name: Applica manifest Kubernetes
         run: |
-          # Sostituisce il tag dell'immagine nei manifest con quello del commit attuale
-          sed -i "s|IMAGE_BACKEND_PLACEHOLDER|${{ env.BACKEND_IMAGE }}|g" k8s/*.yaml
-          sed -i "s|IMAGE_FRONTEND_PLACEHOLDER|${{ env.FRONTEND_IMAGE }}|g" k8s/*.yaml
+          sed -i "s|IMAGE_BACKEND_PLACEHOLDER|$BACKEND_IMAGE|g" k8s/*.yaml
+          sed -i "s|IMAGE_FRONTEND_PLACEHOLDER|$FRONTEND_IMAGE|g" k8s/*.yaml
 
-          # 1. Prima crea il namespace (deve esistere prima dei deployment)
+          # 1. Prima crea il namespace
           kubectl apply -f k8s/namespace.yaml
           kubectl wait --for=jsonpath='{.status.phase}'=Active \
             namespace/nid --timeout=30s
 
-          # 2. Applica i manifest base dell'applicazione
+          # 2. Crea il secret per fare il pull delle immagini da ghcr.io (privato)
+          #    Senza questo il cluster kind non riesce a scaricare le immagini
+          kubectl create secret docker-registry ghcr-secret \
+            --namespace=nid \
+            --docker-server=ghcr.io \
+            --docker-username=$GHCR_USER \
+            --docker-password=$GHCR_TOKEN
+
+          # 3. Applica i manifest base
           kubectl apply -f k8s/backend-deployment.yaml
           kubectl apply -f k8s/backend-service.yaml
           kubectl apply -f k8s/frontend-deployment.yaml
           kubectl apply -f k8s/frontend-service.yaml
 
-          # 3. Manifest opzionali (non bloccano se falliscono)
+          # 4. Manifest opzionali
           kubectl apply -f k8s/backend-hpa.yaml    || true
           kubectl apply -f k8s/frontend-hpa.yaml   || true
           kubectl apply -f k8s/metric-server.yaml  || true
 
-          # 4. Skippa i file che richiedono componenti esterni non presenti in CI:
-          #    - ingress.yaml        → richiede NGINX Ingress Controller
-          #    - cert-manager.yaml   → richiede cert-manager CRDs
-          #    - falco               → richiede Falco installato
-          #    - audit-policy.yaml   → configurazione audit API server
-          echo "ℹ️  Skippati: ingress.yaml, cert-manager.yaml, falco, audit-policy (richiedono componenti esterni)"
+          # 5. Skippati: ingress (NGINX), cert-manager, falco, audit-policy
+          echo "Skippati manifest che richiedono componenti esterni"
+        env:
+          BACKEND_IMAGE: ${{ env.BACKEND_IMAGE }}
+          FRONTEND_IMAGE: ${{ env.FRONTEND_IMAGE }}
+          GHCR_USER: ${{ secrets.GHCR_USER }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
 
       - name: Verifica che i Pod siano Running
         run: |
+          echo "=== Tutti i Pod in tutti i namespace ==="
+          kubectl get pods -A
+
+          echo "=== Deployment nel namespace nid ==="
+          kubectl get deployments -n nid || true
+
+          echo "=== Events nel namespace nid ==="
+          kubectl get events -n nid --sort-by='.lastTimestamp' || true
+
+          echo "=== Attendo i Pod ==="
           kubectl wait --for=condition=ready pod \
             --selector=app=nid-backend \
             --namespace=nid \
-            --timeout=120s
+            --timeout=120s || true
+
           kubectl get pods -n nid
 
 
   # ----------------------------------------------------------
   # STAGE 6: DAST con Nuclei
-  # Test dinamici sull'applicazione in esecuzione.
-  # Prova a colpire gli endpoint FastAPI con payload malevoli
-  # e verifica le risposte — come farebbe un attaccante.
   # ----------------------------------------------------------
   dast-scan:
     name: "6 · DAST (Nuclei)"
     runs-on: ubuntu-latest
-    needs: deploy                   # parte solo dopo il deploy
+    needs: deploy
     steps:
       - name: Checkout codice
         uses: actions/checkout@v4
 
-      # Avvia l'app localmente per poterla testare con Nuclei
       - name: Login a GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -275,11 +259,10 @@ jobs:
             -p 8000:8000 \
             ${{ env.BACKEND_IMAGE }}
 
-          # Aspetta che FastAPI sia pronto (health check)
           echo "Attendo che FastAPI sia pronto..."
           for i in $(seq 1 30); do
             if curl -s http://localhost:8000/health | grep -q "ok\|healthy"; then
-              echo "✅ Backend pronto!"
+              echo "Backend pronto!"
               break
             fi
             echo "  Tentativo $i/30..."
@@ -334,9 +317,9 @@ jobs:
             -d '{"campo_inesistente": "valore_random"}')
           echo "HTTP Status: $RESPONSE"
           if [ "$RESPONSE" = "422" ]; then
-            echo "✅ Validazione input corretta (422 Unprocessable Entity)"
+            echo "Validazione input corretta (422 Unprocessable Entity)"
           else
-            echo "⚠️  Risposta inattesa: $RESPONSE"
+            echo "Risposta inattesa: $RESPONSE"
           fi
 
       - name: Salva report Nuclei
