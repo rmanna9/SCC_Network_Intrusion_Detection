@@ -211,11 +211,11 @@ jobs:
       - name: Applica manifest Kubernetes
         run: |
           # Sostituisce il tag dell'immagine nei manifest con quello del commit attuale
-          sed -i "s|IMAGE_BACKEND_PLACEHOLDER|${{ env.BACKEND_IMAGE }}|g" kubernetes/*.yaml
-          sed -i "s|IMAGE_FRONTEND_PLACEHOLDER|${{ env.FRONTEND_IMAGE }}|g" kubernetes/*.yaml
+          sed -i "s|IMAGE_BACKEND_PLACEHOLDER|${{ env.BACKEND_IMAGE }}|g" k8s/*.yaml
+          sed -i "s|IMAGE_FRONTEND_PLACEHOLDER|${{ env.FRONTEND_IMAGE }}|g" k8s/*.yaml
 
-          # Applica tutti i manifest nella cartella kubernetes/
-          kubectl apply -f kubernetes/
+          # Applica tutti i manifest nella cartella k8s/
+          kubectl apply -f k8s/
 
       - name: Verifica che i Pod siano Running
         run: |
