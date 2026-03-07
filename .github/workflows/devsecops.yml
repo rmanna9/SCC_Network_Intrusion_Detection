@@ -257,8 +257,8 @@ jobs:
           docker run -d \
             --name nids-backend \
             -p 8000:8000 \
+            -v ${{ github.workspace }}/artifacts:/app/artifacts:ro \
             ${{ env.BACKEND_IMAGE }}
-
           echo "Attendo che FastAPI sia pronto..."
           for i in $(seq 1 30); do
             if curl -s http://localhost:8000/health | grep -q "ok\|healthy"; then
