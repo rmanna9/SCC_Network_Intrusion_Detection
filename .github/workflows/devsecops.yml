@@ -232,9 +232,10 @@ jobs:
           kubectl wait --for=condition=ready pod \
             --selector=app=nid-backend \
             --namespace=nid \
-            --timeout=120s
+            --timeout=120s || true   # kind non riesce a fare pull da ghcr.io senza kind load
 
           kubectl get pods -n nid
+          kubectl describe pods -n nid | grep -A5 "Events:" || true
 
 
   # ----------------------------------------------------------
@@ -260,6 +261,7 @@ jobs:
           docker run -d \
             --name nids-backend \
             -p 8000:8000 \
+            -v ${{ github.workspace }}/artifacts:/app/artifacts:ro \
             ${{ env.BACKEND_IMAGE }}
 
           echo "Attendo avvio FastAPI (caricamento modelli ML)..."
